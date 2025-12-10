@@ -1,4 +1,3 @@
-
 export enum Recommendation {
   COMPRAR = 'COMPRAR',
   VENDER = 'VENDER',
@@ -23,4 +22,9 @@ export interface Analysis {
   takeProfit: string;
   chartEmoji: string;
   summary: string;
+}
+
+export interface Source {
+  uri: string;
+  title: string;
 }

@@ -1,6 +1,5 @@
-
-import { GoogleGenAI, Type } from "@google/genai";
-import type { Analysis } from '../types';
+import { GoogleGenAI } from "@google/genai";
+import type { Analysis, Source } from '../types';
 
 const API_KEY = process.env.API_KEY;
 
@@ -10,55 +9,61 @@ if (!API_KEY) {
 
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
-const analysisSchema = {
-  type: Type.OBJECT,
-  properties: {
-    asset: { type: Type.STRING, description: "O símbolo do ativo analisado, ex: BTC/USD" },
-    price: { type: Type.STRING, description: "O preço atual do ativo." },
-    change24h: { type: Type.STRING, description: "A variação percentual nas últimas 24 horas, com sinal de + ou -." },
-    change7d: { type: Type.STRING, description: "A variação percentual nos últimos 7 dias, com sinal de + ou -." },
-    volume: { type: Type.STRING, description: "O volume de negociação nas últimas 24 horas." },
-    trendShortTerm: { type: Type.STRING, description: "A tendência de curto prazo (ex: Alta, Baixa, Lateral)." },
-    trendMediumTerm: { type: Type.STRING, description: "A tendência de médio prazo (ex: Alta, Baixa, Lateral)." },
-    support: { type: Type.STRING, description: "O principal nível de suporte." },
-    resistance: { type: Type.STRING, description: "O principal nível de resistência." },
-    rsi: { type: Type.STRING, description: "O valor do RSI (Índice de Força Relativa) e sua interpretação (ex: 55 - Neutro)." },
-    macd: { type: Type.STRING, description: "O estado do MACD (Convergência/Divergência de Médias Móveis) (ex: Cruzamento de alta)." },
-    movingAverages: { type: Type.STRING, description: "Análise baseada em médias móveis relevantes (ex: Preço acima da MA50)." },
-    recommendation: { type: Type.STRING, enum: ['COMPRAR', 'VENDER', 'AGUARDAR'], description: "A recomendação de ação." },
-    stopLoss: { type: Type.STRING, description: "O preço sugerido para stop-loss." },
-    takeProfit: { type: Type.STRING, description: "O preço sugerido para take-profit." },
-    chartEmoji: { type: Type.STRING, description: "Um único emoji representando a tendência, ex: 📈 para alta, 📉 para baixa, 횡 para lateral." },
-    summary: { type: Type.STRING, description: "Um breve resumo profissional da análise." }
-  },
-  required: ["asset", "price", "change24h", "change7d", "volume", "trendShortTerm", "trendMediumTerm", "support", "resistance", "rsi", "macd", "movingAverages", "recommendation", "stopLoss", "takeProfit", "chartEmoji", "summary"]
-};
+const extractJson = (text: string): object | null => {
+  const match = text.match(/```json\n([\s\S]*?)\n```/);
+  if (match && match[1]) {
+    try {
+      return JSON.parse(match[1]);
+    } catch (e) {
+      console.error("Failed to parse JSON from markdown", e);
+      return null;
+    }
+  }
+  return null;
+}
 
-export const getTradingAnalysis = async (asset: string): Promise<Analysis> => {
+export const getTradingAnalysis = async (asset: string): Promise<{ analysisData: Analysis; sources: Source[] }> => {
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: `Analisa o ativo ${asset} agora.`,
+      // FIX: Moved `tools` into `config` and fixed the `systemInstruction` string to avoid syntax errors.
       config: {
-        systemInstruction: `Tu és o "Trading for Beginners with Me", um analista profissional de mercados com 15 anos de experiência em crypto e forex. O teu criador é Totti Alves Studios AI. Respondes sempre em português do Brasil, de forma objetiva, profissional e com linguagem de trader.
-        Sempre que um utilizador te perguntar sobre um ativo (ex: BTC, ETH, EUR/USD, XAU/USD, etc.) faz o seguinte:
-        1. Busca os dados mais recentes (preço atual, variação 24h/7d, volume).
-        2. Indica a tendência atual (curto e médio prazo).
-        3. Mostra níveis importantes de suporte e resistência.
-        4. Analisa RSI, MACD e médias móveis relevantes.
-        5. Dá uma recomendação clara: COMPRAR / VENDER / AGUARDAR, juntamente com preços sugeridos para stop-loss e take-profit.
-        6. Inclui um emoji simples que represente a tendência (ex: 📈 para alta, 📉 para baixa, 횡 para lateral).
-        7. Fornece um resumo conciso da análise.
-        A tua resposta DEVE seguir o schema JSON fornecido.`,
-        responseMimeType: "application/json",
-        responseSchema: analysisSchema,
+        tools: [{googleSearch: {}}],
+        systemInstruction: 'Tu és o "Trading for Beginners with Me", um analista profissional de mercados com 15 anos de experiência em crypto e forex. O teu criador é Totti Alves Studios AI. Respondes sempre em português do Brasil, de forma objetiva, profissional e com linguagem de trader.\n' +
+        'Sempre que um utilizador te perguntar sobre um ativo (ex: BTC, ETH, EUR/USD, XAU/USD, etc.) faz o seguinte:\n' +
+        '1. **Usa a tua ferramenta de pesquisa** para buscar os dados mais recentes e atualizados (preço atual, variação 24h/7d, volume).\n' +
+        '2. Indica a tendência atual (curto e médio prazo).\n' +
+        '3. Mostra níveis importantes de suporte e resistência.\n' +
+        '4. Analisa RSI, MACD e médias móveis relevantes.\n' +
+        '5. Dá uma recomendação clara: COMPRAR / VENDER / AGUARDAR, juntamente com preços sugeridos para stop-loss e take-profit.\n' +
+        '6. Inclui um emoji simples que represente a tendência (ex: 📈 para alta, 📉 para baixa, 횡 para lateral).\n' +
+        '7. Fornece um resumo conciso da análise.\n' +
+        'A tua resposta DEVE ser um objeto JSON formatado dentro de um bloco de código markdown (```json).\n' +
+        'O JSON deve conter os campos: asset, price, change24h, change7d, volume, trendShortTerm, trendMediumTerm, support, resistance, rsi, macd, movingAverages, recommendation (enum: \'COMPRAR\', \'VENDER\', \'AGUARDAR\'), stopLoss, takeProfit, chartEmoji, summary.',
       },
     });
     
-    const jsonText = response.text.trim();
-    const analysisData = JSON.parse(jsonText);
+    // FIX: Use the .text property, not the .text() method, and check for an empty response.
+    const jsonText = response.text;
+    if (!jsonText) {
+      throw new Error("Failed to get a valid response from the API.");
+    }
+    const analysisData = extractJson(jsonText) as Analysis;
 
-    return analysisData as Analysis;
+    if (!analysisData) {
+      throw new Error("Failed to parse analysis data from API response.");
+    }
+    
+    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
+    const sources: Source[] = groundingChunks
+      .map((chunk: any) => ({
+        uri: chunk.web?.uri,
+        title: chunk.web?.title,
+      }))
+      .filter((source: Source) => source.uri && source.title);
+
+    return { analysisData, sources };
 
   } catch (error) {
     console.error("Error fetching trading analysis:", error);
